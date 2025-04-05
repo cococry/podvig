@@ -1,0 +1,21 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/cc",
+      "-c",
+      "-DLF_X11",
+      "-DLF_RUNARA",
+      "-Wall",
+      "-pedantic",
+      "-O3",
+      "-ffast-math",
+      "-g",
+      "-o",
+      "src/podvig.o",
+      "src/podvig.c"
+    ],
+    "directory": "/home/cococry/dev/podvig",
+    "file": "/home/cococry/dev/podvig/src/podvig.c",
+    "output": "/home/cococry/dev/podvig/src/podvig.o"
+  }
+]
