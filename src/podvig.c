@@ -23,10 +23,8 @@ pv_init(void) {
 }
 
 pv_widget_t 
-pv_widget(pv_state_t* s, pv_widget_ui_layout_func_t layout_cb,
+pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
           float x, float y, float w, float h) {
-  char name[64];
-  sprintf(name, "widget#%i", (int32_t)shlen(s->widgets));
   int32_t focused_mon_idx = pv_monitor_focused_idx(s);
   lf_container_t focused_mon = pv_monitor_by_idx(s, focused_mon_idx);
   pv_widget_data_t data = (pv_widget_data_t){
@@ -37,10 +35,11 @@ pv_widget(pv_state_t* s, pv_widget_ui_layout_func_t layout_cb,
   };
 
   return pv_widget_ex(s, name, layout_cb, &data, 
+                      PV_WIDGET_FLAG_ALWAYS_ONTOP |
                       PV_WIDGET_FLAG_POSX | 
                       PV_WIDGET_FLAG_POSY | 
                       PV_WIDGET_FLAG_WIDTH | 
-                      PV_WIDGET_FLAG_HEIGHT
+                      PV_WIDGET_FLAG_HEIGHT 
                       );
 }
 
@@ -62,8 +61,10 @@ pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_
       if(data->manage_interactive) {
         lf_flag_unset(&winflags, LF_WINDOWING_FLAG_X11_OVERRIDE_REDIRECT);
       }
-    } 
+    }
   }
+  if(flags & PV_WIDGET_FLAG_ALWAYS_ONTOP)
+    lf_ui_core_set_window_hint(LF_WINDOWING_HINT_ABOVE, true);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_POS_X, winx);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_POS_Y, winy);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_TRANSPARENT_FRAMEBUFFER, transparent_framebuffer);
@@ -171,6 +172,11 @@ pv_monitor_by_idx(pv_state_t* s, uint32_t idx) {
   };
 }
 #endif
+
+pv_widget_t*
+pv_widget_by_name(pv_state_t* s, const char* name) {
+  return &shget(s->widgets, name);
+}
 
 void 
 pv_run(pv_state_t* s) {

@@ -23,6 +23,7 @@ typedef enum {
   PV_WIDGET_FLAG_TRANSPARENT_FRAMEBUFFER = 1 << 5,
   PV_WIDGET_FLAG_MANAGE_INTERACTIVE = 1 << 6,
   PV_WIDGET_FLAG_HIDDEN = 1 << 7,
+  PV_WIDGET_FLAG_ALWAYS_ONTOP = 1 << 8,
 } pv_widget_data_flag_t;
 
 typedef void (*pv_widget_ui_layout_func_t)(lf_ui_state_t* ui);
@@ -42,8 +43,7 @@ typedef struct {
 } pv_state_t;
 
 pv_state_t* pv_init(void);
-
-pv_widget_t pv_widget(pv_state_t* s, pv_widget_ui_layout_func_t layout_cb,
+pv_widget_t pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
     float x, float y, float w, float h);
 
 pv_widget_t pv_widget_ex(
@@ -59,6 +59,7 @@ int32_t pv_monitor_focused_idx(pv_state_t* s);
 
 lf_container_t pv_monitor_by_idx(pv_state_t* s, uint32_t idx);
 
+pv_widget_t* pv_widget_by_name(pv_state_t* s, const char* name);
 
 void pv_run(pv_state_t* s);
 
