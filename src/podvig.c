@@ -1,14 +1,23 @@
 #include "../include/podvig/podvig.h"
+#include <X11/X.h>
+#ifdef LF_X11
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#endif
+#include <leif/animation.h>
+#include <leif/color.h>
 #include <leif/leif.h>
 #include <leif/ui_core.h>
 #include <leif/util.h>
+#include <leif/widget.h>
 #include <leif/win.h>
 
 #define STB_DS_IMPLEMENTATION
 #include "../vendor/stb_ds.h"
 
 #define INTERSECT(x,y,w,h,r)  (MAX(0, MIN((x)+(w),(r).x_org+(r).width)  - MAX((x),(r).x_org))) 
+
+static void evcallback(void* ev, lf_ui_state_t* ui);
 
 pv_state_t* 
 pv_init(void) {
@@ -19,10 +28,12 @@ pv_init(void) {
   }
   s->widgets = NULL;
   if(lf_windowing_init() != 0) return NULL;
+
+
   return s;
 }
 
-pv_widget_t 
+pv_widget_t* 
 pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
           float x, float y, float w, float h) {
   int32_t focused_mon_idx = pv_monitor_focused_idx(s);
@@ -32,6 +43,7 @@ pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
     .y = focused_mon.pos.y + y,
     .width = w,
     .height = h,
+    .always_ontop = true
   };
 
   return pv_widget_ex(s, name, layout_cb, &data, 
@@ -43,9 +55,10 @@ pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
                       );
 }
 
-pv_widget_t 
+pv_widget_t*
 pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb, pv_widget_data_t* data, uint32_t flags) {
-  pv_widget_t widget = {0};
+  pv_widget_t* widget = malloc(sizeof(*widget));
+  memset(widget, 0, sizeof(*widget));
   uint32_t winx = 0, winy = 0, winw = 256, winh = 256; // 256 Is default size of widgets 
   bool transparent_framebuffer = true;
   bool hidden = false;
@@ -63,7 +76,7 @@ pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_
       }
     }
   }
-  if(flags & PV_WIDGET_FLAG_ALWAYS_ONTOP)
+  if(flags & PV_WIDGET_FLAG_ALWAYS_ONTOP && data->always_ontop)
     lf_ui_core_set_window_hint(LF_WINDOWING_HINT_ABOVE, true);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_POS_X, winx);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_POS_Y, winy);
@@ -73,26 +86,51 @@ pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_
     winw, winh, 
     flags && lf_flag_exists(&flags, PV_WIDGET_FLAG_TITLE) ? data->title : "pv_widget");
 
-  widget.ui = lf_ui_core_init(win);
-  widget.ui->needs_render = true;
-  widget.data = *data;
+  widget->ui = lf_ui_core_init(win);
+  widget->ui->user_data = widget;
+  widget->ui->needs_render = true;
+  widget->data = *data;
+  widget->data.anim = PV_WIDGET_ANIMATION_NONE;
+
+  widget->root_div = lf_div(widget->ui);
+  widget->root_div->base.scrollable = false;
+  widget->root_div->base.props.color = LF_NO_COLOR;
+  widget->data.root_div_color = widget->root_div->base.props.color;
+  widget->name = strdup(name);
+  
+  lf_win_set_event_cb(win, evcallback);
+
   if(layout_cb) {
-    layout_cb(widget.ui);
+    lf_component(widget->ui, layout_cb);
   }
+  lf_div_end(widget->ui);
   if(hidden) {
     lf_win_hide(win);
   }
     
-  shput(s->widgets, name, widget);
+  shput(s->widgets, name, *widget);
 
   return widget;
+}
+
+void hidewindow(lf_ui_state_t* ui, lf_timer_t* timer) {
+  (void)ui;
+  (void)timer;
+  lf_win_hide(ui->win);
 }
 
 void 
 pv_widget_hide(pv_widget_t* widget) {
   if(!widget || widget->data.hidden) return;
-  lf_win_hide(widget->ui->win);
   widget->data.hidden = true;
+  if(widget->data.anim != PV_WIDGET_ANIMATION_NONE) {
+    lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, 0.0f);
+    widget->data.root_div_color = widget->root_div->base.props.color;
+    lf_widget_set_prop_color(widget->ui, &widget->root_div->base, &widget->root_div->base.props.color, LF_NO_COLOR);
+    lf_ui_core_start_timer(widget->ui, widget->data.anim_time, hidewindow);
+  } else {
+    lf_win_hide(widget->ui->win);
+  }
 }
 
 void 
@@ -100,8 +138,58 @@ pv_widget_show(pv_widget_t* widget) {
   if(!widget || !widget->data.hidden) return;
   lf_win_show(widget->ui->win);
   widget->data.hidden = false;
+  if(widget->data.anim != PV_WIDGET_ANIMATION_NONE) {
+    lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, lf_win_get_size(widget->ui->win).y);
+    lf_widget_set_prop_color(widget->ui, &widget->root_div->base, &widget->root_div->base.props.color, widget->data.root_div_color); 
+  }
+
+  int grab_event_mask = ButtonPressMask | ButtonReleaseMask |
+    PointerMotionMask | EnterWindowMask | LeaveWindowMask;
+  if (XGrabPointer(lf_win_get_x11_display(), 
+                   widget->ui->win, False, grab_event_mask,
+                   GrabModeAsync, GrabModeAsync,
+                   None, None, CurrentTime) != GrabSuccess) {
+    fprintf(stderr, "podvig: failed to grab pointer for popup.\n");
+    return;
+  }
+
+  XFlush(lf_win_get_x11_display());
 }
 
+
+#ifdef LF_X11
+void 
+pv_widget_set_popup_of(pv_state_t* s, pv_widget_t* popup, lf_window_t parent) {
+  Display* dsp = lf_win_get_x11_display();
+  XSetTransientForHint(dsp, popup->ui->win, parent);
+  Atom window_type_atom = XInternAtom(dsp, "_NET_WM_WINDOW_TYPE", False);
+  Atom popup_atom = XInternAtom(dsp, "_NET_WM_WINDOW_TYPE_POPUP_MENU", False);
+
+  XChangeProperty(dsp, popup->ui->win, window_type_atom,
+                  XA_ATOM, 32, PropModeReplace,
+                  (unsigned char *)&popup_atom, 1);
+  pv_widget_t* ref = &shget(s->widgets, popup->name); 
+  popup->data.is_popup = true;
+  ref->data.is_popup = true;
+}
+#endif
+
+void 
+pv_widget_set_animation(pv_widget_t* widget,  pv_widget_animation_t anim, float anim_time,
+    lf_animation_func_t anim_func) {
+  if(!widget) return;
+  widget->data.anim = anim;
+  widget->data.anim_time = anim_time;
+  widget->data.anim_func = anim_func;
+
+  lf_widget_set_transition_props(&widget->root_div->base, anim_time, anim_func);
+  lf_style_widget_prop_color(widget->ui, &widget->root_div->base, color,  widget->ui->root->props.color);
+  widget->ui->root->props.color = LF_NO_COLOR;
+  if(anim == PV_WIDGET_ANIMATION_SLIDE_OUT_VERT) {
+    lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, 0.0f);
+    lf_widget_set_padding(widget->ui, &widget->root_div->base, 0.0f);
+  }
+}
 #ifdef LF_X11
 #include <X11/extensions/Xinerama.h>
 int32_t 
@@ -180,12 +268,47 @@ pv_widget_by_name(pv_state_t* s, const char* name) {
 
 void 
 pv_run(pv_state_t* s) {
+  while(pv_update(s));
+}
+
+void evcallback(void* ev, lf_ui_state_t* ui) {
+  XEvent* xev = (XEvent*)ev;
+  switch(xev->type) {
+    case ButtonPress: 
+      {
+        pv_widget_t* widget = (pv_widget_t*)ui->user_data;
+        if(!widget) break;
+        if(widget->data.is_popup) {
+          // Query global pointer location
+          Window root_return, child_return;
+          int root_x, root_y;
+          int win_x, win_y;
+          unsigned int mask;
+
+          XQueryPointer(
+            lf_win_get_x11_display(), DefaultRootWindow(lf_win_get_x11_display()), 
+            &root_return, &child_return,
+            &root_x, &root_y, &win_x, &win_y, &mask);
+
+          // Check if pointer is inside the popup bounds
+          if (root_x < widget->data.x || root_x > widget->data.x + widget->data.width ||
+            root_y < widget->data.y || root_y > widget->data.y + widget->data.height) {
+            pv_widget_hide(widget);
+            XUngrabPointer(lf_win_get_x11_display(), CurrentTime);
+          }
+        }
+        break;
+      }
+  }
+}
+
+bool 
+pv_update(pv_state_t* s) {
   bool running = true;
-  while(running) {
     for(uint32_t i = 0; i < (uint32_t)shlenu(s->widgets); i++) {
       pv_widget_t widget = s->widgets[i].value; 
       running = widget.ui->running; 
       lf_ui_core_next_event(widget.ui);
     }
-  }
+  return running;
 }
