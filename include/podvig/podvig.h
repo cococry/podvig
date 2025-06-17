@@ -24,6 +24,9 @@ typedef struct {
   lf_animation_func_t anim_func;
   lf_color_t root_div_color;
   bool is_popup;
+  bool borderwidth;
+  uint32_t bordercolor;
+  bool popup_initial_click;
 } pv_widget_data_t;
 
 typedef enum {
@@ -37,6 +40,8 @@ typedef enum {
   PV_WIDGET_FLAG_HIDDEN = 1 << 7,
   PV_WIDGET_FLAG_ALWAYS_ONTOP = 1 << 8,
   PV_WIDGET_FLAG_IS_POPUP = 1 << 9,
+  PV_WIDGET_FLAG_BORDER_WIDTH = 1 << 10,
+  PV_WIDGET_FLAG_BORDER_COLOR = 1 << 11,
 } pv_widget_data_flag_t;
 
 typedef void (*pv_widget_ui_layout_func_t)(lf_ui_state_t* ui);

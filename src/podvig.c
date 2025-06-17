@@ -36,22 +36,24 @@ pv_init(void) {
 pv_widget_t* 
 pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
           float x, float y, float w, float h) {
-  int32_t focused_mon_idx = pv_monitor_focused_idx(s);
-  lf_container_t focused_mon = pv_monitor_by_idx(s, focused_mon_idx);
   pv_widget_data_t data = (pv_widget_data_t){
-    .x = focused_mon.pos.x + x, 
-    .y = focused_mon.pos.y + y,
+    .x = x, 
+    .y = y,
     .width = w,
     .height = h,
-    .always_ontop = true
+    .always_ontop = true, 
+    .borderwidth = 0, 
+    .bordercolor = 0x0
   };
 
   return pv_widget_ex(s, name, layout_cb, &data, 
                       PV_WIDGET_FLAG_ALWAYS_ONTOP |
-                      PV_WIDGET_FLAG_POSX | 
-                      PV_WIDGET_FLAG_POSY | 
-                      PV_WIDGET_FLAG_WIDTH | 
-                      PV_WIDGET_FLAG_HEIGHT 
+                      PV_WIDGET_FLAG_POSX         | 
+                      PV_WIDGET_FLAG_POSY         | 
+                      PV_WIDGET_FLAG_WIDTH        | 
+                      PV_WIDGET_FLAG_HEIGHT       |
+                      PV_WIDGET_FLAG_BORDER_WIDTH | 
+                      PV_WIDGET_FLAG_BORDER_COLOR  
                       );
 }
 
@@ -59,8 +61,10 @@ pv_widget_t*
 pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb, pv_widget_data_t* data, uint32_t flags) {
   pv_widget_t* widget = malloc(sizeof(*widget));
   memset(widget, 0, sizeof(*widget));
-  uint32_t winx = 0, winy = 0, winw = 256, winh = 256; // 256 Is default size of widgets 
+  uint32_t winx = 0, winy = 0, winw = 256, winh = 256, borderwidth = 0,
+  bordercolor = 0x0; // 256 Is default size of widgets 
   bool transparent_framebuffer = true;
+  
   bool hidden = false;
   uint32_t winflags = LF_WINDOWING_FLAG_X11_OVERRIDE_REDIRECT;
   if(data) {
@@ -68,6 +72,9 @@ pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_
     if(lf_flag_exists(&flags, PV_WIDGET_FLAG_POSY))   winy = data->y;
     if(lf_flag_exists(&flags, PV_WIDGET_FLAG_WIDTH))  winw = data->width;
     if(lf_flag_exists(&flags, PV_WIDGET_FLAG_HEIGHT)) winh = data->height;
+    if(lf_flag_exists(&flags, PV_WIDGET_FLAG_HEIGHT)) winh = data->height;
+    if(lf_flag_exists(&flags, PV_WIDGET_FLAG_BORDER_WIDTH)) borderwidth = data->borderwidth;
+    if(lf_flag_exists(&flags, PV_WIDGET_FLAG_BORDER_COLOR)) bordercolor = data->bordercolor;
     if(lf_flag_exists(&flags, PV_WIDGET_FLAG_TRANSPARENT_FRAMEBUFFER)) transparent_framebuffer = data->transparent_framebuffer;
     if(lf_flag_exists(&flags, PV_WIDGET_FLAG_HIDDEN)) hidden = true; 
     if(lf_flag_exists(&flags, PV_WIDGET_FLAG_MANAGE_INTERACTIVE)) {
@@ -80,6 +87,8 @@ pv_widget_ex(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_
     lf_ui_core_set_window_hint(LF_WINDOWING_HINT_ABOVE, true);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_POS_X, winx);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_POS_Y, winy);
+  lf_ui_core_set_window_hint(LF_WINDOWING_HINT_BORDER_WIDTH, borderwidth);
+  lf_ui_core_set_window_hint(LF_WINDOWING_HINT_BORDER_COLOR, bordercolor);
   lf_ui_core_set_window_hint(LF_WINDOWING_HINT_TRANSPARENT_FRAMEBUFFER, transparent_framebuffer);
   lf_ui_core_set_window_flags(winflags);
   lf_window_t win = lf_ui_core_create_window(
@@ -278,8 +287,8 @@ void evcallback(void* ev, lf_ui_state_t* ui) {
       {
         pv_widget_t* widget = (pv_widget_t*)ui->user_data;
         if(!widget) break;
+        if(widget->data.hidden) break;
         if(widget->data.is_popup) {
-          // Query global pointer location
           Window root_return, child_return;
           int root_x, root_y;
           int win_x, win_y;
@@ -290,12 +299,20 @@ void evcallback(void* ev, lf_ui_state_t* ui) {
             &root_return, &child_return,
             &root_x, &root_y, &win_x, &win_y, &mask);
 
-          // Check if pointer is inside the popup bounds
-          if (root_x < widget->data.x || root_x > widget->data.x + widget->data.width ||
-            root_y < widget->data.y || root_y > widget->data.y + widget->data.height) {
-            pv_widget_hide(widget);
-            XUngrabPointer(lf_win_get_x11_display(), CurrentTime);
-          }
+          printf("=============================\n");
+          printf("Cursor: %i, %i\n", root_x, root_y);
+          printf("Win: %i, %i\n", widget->data.x, widget->data.y);
+          printf("Win size: %i, %i\n", widget->data.width, widget->data.height);
+          printf("=============================\n");
+            if (root_x < widget->data.x || root_x > widget->data.x + widget->data.width ||
+              root_y < widget->data.y || root_y > widget->data.y + widget->data.height) {
+              pv_widget_hide(widget);
+              XUngrabPointer(lf_win_get_x11_display(), CurrentTime);
+            printf("Pressed for (%i, %i, %i, %i) and (%i, %i).\n", 
+                   widget->data.x, widget->data.y, widget->data.width, widget->data.height,
+                   root_x, root_y
+                   );
+            }
         }
         break;
       }
