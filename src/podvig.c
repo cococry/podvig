@@ -128,15 +128,22 @@ void hidewindow(lf_ui_state_t* ui, lf_timer_t* timer) {
   lf_win_hide(ui->win);
 }
 
-void 
+void finishcb(lf_animation_t* anim, void* data) {
+  hidewindow((lf_ui_state_t*)anim->user_data, NULL);
+  printf("Hiding window.\n");
+}
+
+void
 pv_widget_hide(pv_widget_t* widget) {
   if(!widget || widget->data.hidden) return;
   widget->data.hidden = true;
   if(widget->data.anim != PV_WIDGET_ANIMATION_NONE) {
-    lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, 0.0f);
+    lf_animation_t* anim = 
+      lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, 0.0f);
+    anim->finish_cb = finishcb;
+    anim->user_data = widget->ui;
     widget->data.root_div_color = widget->root_div->base.props.color;
     lf_widget_set_prop_color(widget->ui, &widget->root_div->base, &widget->root_div->base.props.color, LF_NO_COLOR);
-    lf_ui_core_start_timer(widget->ui, widget->data.anim_time, hidewindow);
   } else {
     lf_win_hide(widget->ui->win);
   }
@@ -299,19 +306,10 @@ void evcallback(void* ev, lf_ui_state_t* ui) {
             &root_return, &child_return,
             &root_x, &root_y, &win_x, &win_y, &mask);
 
-          printf("=============================\n");
-          printf("Cursor: %i, %i\n", root_x, root_y);
-          printf("Win: %i, %i\n", widget->data.x, widget->data.y);
-          printf("Win size: %i, %i\n", widget->data.width, widget->data.height);
-          printf("=============================\n");
             if (root_x < widget->data.x || root_x > widget->data.x + widget->data.width ||
               root_y < widget->data.y || root_y > widget->data.y + widget->data.height) {
               pv_widget_hide(widget);
               XUngrabPointer(lf_win_get_x11_display(), CurrentTime);
-            printf("Pressed for (%i, %i, %i, %i) and (%i, %i).\n", 
-                   widget->data.x, widget->data.y, widget->data.width, widget->data.height,
-                   root_x, root_y
-                   );
             }
         }
         break;
