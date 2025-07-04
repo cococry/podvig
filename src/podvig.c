@@ -1,5 +1,6 @@
 #include "../include/podvig/podvig.h"
 #include <X11/X.h>
+#include <leif/ez_api.h>
 #ifdef LF_X11
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -43,7 +44,8 @@ pv_widget(pv_state_t* s, const char* name, pv_widget_ui_layout_func_t layout_cb,
     .height = h,
     .always_ontop = true, 
     .borderwidth = 0, 
-    .bordercolor = 0x0
+    .bordercolor = 0x0,
+    .close_cb = NULL
   };
 
   return pv_widget_ex(s, name, layout_cb, &data, 
@@ -130,7 +132,6 @@ void hidewindow(lf_ui_state_t* ui, lf_timer_t* timer) {
 
 void finishcb(lf_animation_t* anim, void* data) {
   hidewindow((lf_ui_state_t*)anim->user_data, NULL);
-  printf("Hiding window.\n");
 }
 
 void
@@ -149,15 +150,36 @@ pv_widget_hide(pv_widget_t* widget) {
   }
 }
 
+typedef struct {
+  lf_color_t color, text_color, border_color;
+} widget_colors_t;
+void 
+showallwidgets(pv_widget_t* pvwidget, lf_ui_state_t* ui, lf_widget_t* widget) {
+  if(pvwidget->data.anim == PV_WIDGET_ANIMATION_NONE) return;
+  widget->props.color = LF_NO_COLOR;
+  widget->props.text_color = LF_NO_COLOR;
+  widget->props.border_color = LF_NO_COLOR;
+  widget_colors_t colors = *(widget_colors_t*)widget->user_data;
+  lf_style_widget_prop_color(ui, widget, color, colors.color); 
+  lf_style_widget_prop_color(ui, widget, text_color, colors.text_color);
+  lf_style_widget_prop_color(ui, widget, border_color, colors.border_color); 
+  for(uint32_t i = 0; i < widget->num_childs; i++) {
+    showallwidgets(pvwidget, ui, widget->childs[i]);
+  }
+}
+
+
 void 
 pv_widget_show(pv_widget_t* widget) {
   if(!widget || !widget->data.hidden) return;
+  if(widget->data.open_cb) {
+    widget->data.open_cb(widget);
+  }
   lf_win_show(widget->ui->win);
   widget->data.hidden = false;
-  if(widget->data.anim != PV_WIDGET_ANIMATION_NONE) {
-    lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, lf_win_get_size(widget->ui->win).y);
-    lf_widget_set_prop_color(widget->ui, &widget->root_div->base, &widget->root_div->base.props.color, widget->data.root_div_color); 
-  }
+  lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, lf_win_get_size(widget->ui->win).y);
+  lf_widget_set_prop_color(widget->ui, &widget->root_div->base, &widget->root_div->base.props.color, widget->data.root_div_color); 
+  showallwidgets(widget, widget->ui, widget->ui->root);
 
   int grab_event_mask = ButtonPressMask | ButtonReleaseMask |
     PointerMotionMask | EnterWindowMask | LeaveWindowMask;
@@ -168,6 +190,7 @@ pv_widget_show(pv_widget_t* widget) {
     fprintf(stderr, "podvig: failed to grab pointer for popup.\n");
     return;
   }
+
 
   XFlush(lf_win_get_x11_display());
 }
@@ -191,6 +214,29 @@ pv_widget_set_popup_of(pv_state_t* s, pv_widget_t* popup, lf_window_t parent) {
 #endif
 
 void 
+hideallwidgets(lf_widget_t* widget) {
+  widget->props.color = LF_NO_COLOR;
+  widget->props.text_color = LF_NO_COLOR;
+  widget->props.border_color = LF_NO_COLOR;
+  for(uint32_t i = 0; i < widget->num_childs; i++) {
+    hideallwidgets(widget->childs[i]);
+  }
+}
+void 
+storewidgetcolors(lf_widget_t* widget) {
+  if(!widget->user_data) {
+    widget_colors_t* colors =  malloc(sizeof(widget_colors_t));
+    colors->color = widget->props.color;
+    colors->text_color = widget->props.text_color;
+    colors->border_color = widget->props.border_color;
+    widget->user_data = colors;
+  }
+  for(uint32_t i = 0; i < widget->num_childs; i++) {
+    storewidgetcolors(widget->childs[i]);
+  }
+}
+
+void 
 pv_widget_set_animation(pv_widget_t* widget,  pv_widget_animation_t anim, float anim_time,
     lf_animation_func_t anim_func) {
   if(!widget) return;
@@ -200,7 +246,8 @@ pv_widget_set_animation(pv_widget_t* widget,  pv_widget_animation_t anim, float 
 
   lf_widget_set_transition_props(&widget->root_div->base, anim_time, anim_func);
   lf_style_widget_prop_color(widget->ui, &widget->root_div->base, color,  widget->ui->root->props.color);
-  widget->ui->root->props.color = LF_NO_COLOR;
+  storewidgetcolors(widget->ui->root);
+  hideallwidgets(widget->ui->root);
   if(anim == PV_WIDGET_ANIMATION_SLIDE_OUT_VERT) {
     lf_widget_set_fixed_height(widget->ui, &widget->root_div->base, 0.0f);
     lf_widget_set_padding(widget->ui, &widget->root_div->base, 0.0f);
@@ -308,7 +355,10 @@ void evcallback(void* ev, lf_ui_state_t* ui) {
 
             if (root_x < widget->data.x || root_x > widget->data.x + widget->data.width ||
               root_y < widget->data.y || root_y > widget->data.y + widget->data.height) {
-              pv_widget_hide(widget);
+            pv_widget_hide(widget);
+            if(widget->data.close_cb) {
+              widget->data.close_cb(widget);
+            }
               XUngrabPointer(lf_win_get_x11_display(), CurrentTime);
             }
         }

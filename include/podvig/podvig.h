@@ -5,11 +5,16 @@
 #define PV_CENTERED_X(s, w) ((pv_monitor_by_idx((s), pv_monitor_focused_idx((s))).size.x - (w)) / 2.0f)
 #define PV_CENTERED_Y(s, h) ((pv_monitor_by_idx((s), pv_monitor_focused_idx((s))).size.y - (h)) / 2.0f)
 
+
 typedef enum {
   PV_WIDGET_ANIMATION_NONE,
   PV_WIDGET_ANIMATION_SLIDE_OUT_VERT,
   PV_WIDGET_ANIMATION_SLIDE_OUT_HORZ,
 } pv_widget_animation_t;
+
+typedef struct pv_widget_t pv_widget_t;
+typedef void (*pv_widget_close_cb)(struct pv_widget_t* widget);
+typedef void (*pv_widget_open_cb)(struct pv_widget_t* widget);
 
 typedef struct {
   uint32_t width, height;
@@ -27,6 +32,8 @@ typedef struct {
   bool borderwidth;
   uint32_t bordercolor;
   bool popup_initial_click;
+  pv_widget_close_cb close_cb;
+  pv_widget_open_cb open_cb;
 } pv_widget_data_t;
 
 typedef enum {
@@ -46,12 +53,12 @@ typedef enum {
 
 typedef void (*pv_widget_ui_layout_func_t)(lf_ui_state_t* ui);
 
-typedef struct {
+struct pv_widget_t {
   lf_ui_state_t* ui;
   pv_widget_data_t data;
   lf_div_t* root_div;
   char* name;
-} pv_widget_t;
+};
 
 typedef struct {
   char* key;
